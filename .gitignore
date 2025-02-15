@@ -1,0 +1,7 @@
+__pycache__
+app/__pycache__
+.venv
+.venv-cb-client
+.venv-cb-service
+.venv-cb-database
+.env
