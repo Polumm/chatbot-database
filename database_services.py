@@ -3,7 +3,7 @@ from werkzeug.security import generate_password_hash
 import json
 import time
 import random
-
+from datetime import datetime
 from models import db, User  # Your SQLAlchemy models
 
 database_bp = Blueprint("database", __name__)
@@ -174,3 +174,41 @@ def delete_session(username, session_id):
         return jsonify({"message": f"Session '{session_id}' deleted."}), 200
     else:
         return jsonify({"error": f"Session '{session_id}' not found."}), 404
+
+
+@database_bp.route("/botchat/search/<username>", methods=["GET"])
+def search_messages(username):
+    """
+    Fuzzy search across all chat sessions for the specified user.
+    Usage: GET /botchat/search/<username>?query=xxx
+    """
+    query = request.args.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "No query provided."}), 400
+
+    session_list_key = f"bot-sessions-{username}"
+    session_ids = current_app.redis.smembers(session_list_key)
+    results = []
+
+    for session_id in session_ids:
+        conversation_key = f"bot-{username}-{session_id}"
+        messages_with_score = current_app.redis.zrange(
+            conversation_key, 0, -1, withscores=True
+        )
+
+        for msg_json, score in messages_with_score:
+            msg_obj = json.loads(msg_json)
+            if query.lower() in msg_obj.get("text", "").lower():
+                msg_time = datetime.fromtimestamp(score).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                results.append(
+                    {
+                        "session_id": session_id,
+                        "sender": msg_obj.get("sender", "unknown"),
+                        "text": msg_obj.get("text", ""),
+                        "time": msg_time,
+                    }
+                )
+
+    return jsonify({"results": results, "query": query}), 200
