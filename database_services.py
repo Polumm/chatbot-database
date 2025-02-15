@@ -66,11 +66,13 @@ def delete_user(username):
 @database_bp.route("/botchat/sessions", methods=["POST"])
 def new_session():
     """
-    Create a new chat session (stored in Redis).
+    Create a new chat session (stored in Redis) while ensuring uniqueness per user.
     """
     data = request.get_json()
     username = data.get("username")
-    session_name = data.get("session_name", "").strip()
+    session_name = (
+        data.get("session_name", "").strip().lower()
+    )  # Normalize session name
 
     if not username or not session_name:
         return jsonify(
@@ -78,7 +80,20 @@ def new_session():
         ), 400
 
     session_list_key = f"bot-sessions-{username}"
+
+    # Ensure uniqueness: Check if session already exists for this user (case-insensitive)
+    existing_sessions = {s.lower() for s in current_app.redis.smembers(session_list_key)}  # Convert to lowercase set
+
+    if session_name.lower() in existing_sessions:
+        return jsonify(
+            {
+                "error": f"Session '{session_name}' already exists for user '{username}'."
+            }
+        ), 400
+
+    # Add new session name under user's session list
     current_app.redis.sadd(session_list_key, session_name)
+
     return jsonify({"message": f"New session '{session_name}' created!"}), 201
 
 
@@ -100,37 +115,35 @@ def send_message():
     but the conversation key is always tied to the real user's name.
     """
     data = request.get_json()
-
-    # 'username' is the real user who "owns" the conversation
     username = data.get("username", "").strip()
-
-    # 'sender' can be "user" or "bot" (or default to username if missing)
     sender = data.get("sender", username).strip()
-
-    session_id = data.get("session_id", "").strip()
+    session_id = (
+        data.get("session_id", "").strip().lower()
+    )  # Normalize session ID
     message = data.get("message", "").strip()
     timestamp = data.get("time", "").strip()
+
     if not timestamp:
-        # fallback if not provided
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        timestamp = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime()
+        )  # Fallback timestamp
 
     if not username or not session_id or not message:
         return jsonify(
             {"error": "username, session_id, and message are required."}
         ), 400
 
-    # Make sure session exists if sender != 'bot'
-    if sender != "bot":
-        session_list_key = f"bot-sessions-{username}"
-        if not current_app.redis.sismember(session_list_key, session_id):
-            return jsonify(
-                {"error": f"Session '{session_id}' does not exist."}
-            ), 400
+    # Ensure session exists before storing messages
+    session_list_key = f"bot-sessions-{username}"
+    if not current_app.redis.sismember(session_list_key, session_id):
+        return jsonify(
+            {
+                "error": f"Session '{session_id}' does not exist for user '{username}'."
+            }
+        ), 400
 
-    # Always use the real 'username' for the conversation key
+    # Store messages uniquely per (username, session_id)
     conversation_key = f"bot-{username}-{session_id}"
-
-    # Build the message data with 'sender' and 'text'
     message_data = {"sender": sender, "text": message, "time": timestamp}
 
     # Score for sorted insertion
@@ -149,13 +162,14 @@ def get_messages(username, session_id):
     """
     Retrieve all messages for a given (username, session_id) from Redis.
     """
+    session_id = session_id.lower()  # Normalize session ID
     conversation_key = f"bot-{username}-{session_id}"
+
     raw_data = current_app.redis.zrange(
         conversation_key, 0, -1, withscores=True
     )
-    messages = []
-    for msg_json, _score in raw_data:
-        messages.append(json.loads(msg_json))
+    messages = [json.loads(msg_json) for msg_json, _ in raw_data]
+
     return jsonify({"messages": messages}), 200
 
 
@@ -166,14 +180,27 @@ def delete_session(username, session_id):
     """
     Delete a specific session (and its messages) from Redis.
     """
+    session_id = session_id.lower()  # Normalize session ID
     session_list_key = f"bot-sessions-{username}"
-    if current_app.redis.sismember(session_list_key, session_id):
-        current_app.redis.srem(session_list_key, session_id)
-        conversation_key = f"bot-{username}-{session_id}"
-        current_app.redis.delete(conversation_key)
-        return jsonify({"message": f"Session '{session_id}' deleted."}), 200
-    else:
-        return jsonify({"error": f"Session '{session_id}' not found."}), 404
+
+    # Ensure the session belongs to the user
+    if not current_app.redis.sismember(session_list_key, session_id):
+        return jsonify(
+            {
+                "error": f"Session '{session_id}' not found for user '{username}'."
+            }
+        ), 404
+
+    # Remove session from user's session list
+    current_app.redis.srem(session_list_key, session_id)
+
+    # Delete messages associated with the session
+    conversation_key = f"bot-{username}-{session_id}"
+    current_app.redis.delete(conversation_key)
+
+    return jsonify(
+        {"message": f"Session '{session_id}' deleted for user '{username}'."}
+    ), 200
 
 
 @database_bp.route("/botchat/search/<username>", methods=["GET"])
@@ -182,7 +209,7 @@ def search_messages(username):
     Fuzzy search across all chat sessions for the specified user.
     Usage: GET /botchat/search/<username>?query=xxx
     """
-    query = request.args.get("query", "").strip()
+    query = request.args.get("query", "").strip().lower()
     if not query:
         return jsonify({"error": "No query provided."}), 400
 
@@ -198,9 +225,9 @@ def search_messages(username):
 
         for msg_json, score in messages_with_score:
             msg_obj = json.loads(msg_json)
-            if query.lower() in msg_obj.get("text", "").lower():
-                msg_time = datetime.fromtimestamp(score).strftime(
-                    "%Y-%m-%d %H:%M:%S"
+            if query in msg_obj.get("text", "").lower():
+                msg_time = time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(score)
                 )
                 results.append(
                     {
