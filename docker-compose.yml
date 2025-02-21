@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  chatbot-database:
+    build:
+    ports:
+      - "6000:6000"
+    # environment:
+    #   - FLASK_ENV=development
+    restart: always
