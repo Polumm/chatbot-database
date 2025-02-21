@@ -2,9 +2,10 @@ version: "3.8"
 
 services:
   chatbot-database:
-    build:
+    image: ghcr.io/polumm/chatbot-database:latest
     ports:
       - "6000:6000"
     environment:
       - FLASK_ENV=development
+      - SQLALCHEMY_DATABASE_URI=${SQLALCHEMY_DATABASE_URI}
     restart: always
