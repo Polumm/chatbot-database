@@ -5,3 +5,4 @@ app/__pycache__
 .venv-cb-service
 .venv-cb-database
 .env
+cmd_env
