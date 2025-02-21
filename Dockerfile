@@ -11,7 +11,7 @@ COPY . /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose port for Client API
-EXPOSE 6000
+EXPOSE 6003
 
 # Run the client application
 CMD ["python", "app.py"]

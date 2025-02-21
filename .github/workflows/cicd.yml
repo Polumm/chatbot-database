@@ -63,7 +63,7 @@ jobs:
             docker pull ghcr.io/$REPO_NAME/chatbot-database:latest
 
             echo "🔹 Running new container..."
-            docker run -d --name chatbot-database -p 6000:6000 \
+            docker run -d --name chatbot-database -p 6003:6003 \
               -e FLASK_ENV=development \
               -e SQLALCHEMY_DATABASE_URI="${SQLALCHEMY_DATABASE_URI}" \
               ghcr.io/$REPO_NAME/chatbot-database:latest

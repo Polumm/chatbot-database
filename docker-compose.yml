@@ -3,7 +3,7 @@ version: "3.8"
 services:
   chatbot-database:
     ports:
-      - "6000:6000"
+      - "6003:6003"
     environment:
       - FLASK_ENV=development
       - SQLALCHEMY_DATABASE_URI=${SQLALCHEMY_DATABASE_URI}
