@@ -2,7 +2,6 @@ version: "3.8"
 
 services:
   chatbot-database:
-    image: ghcr.io/polumm/chatbot-database:latest
     ports:
       - "6000:6000"
     environment:
