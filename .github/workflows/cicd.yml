@@ -15,6 +15,10 @@ env:
   SERVER_KEY: ${{ secrets.SERVER_KEY }}
   GHCR_USER: ${{ github.repository_owner }}
   SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PORT: ${{ secrets.REDIS_PORT }}
+  REDIS_DB: ${{ secrets.REDIS_DB }}
+  REDIS_DECODE_RESPONSES: ${{ secrets.REDIS_DECODE_RESPONSES }}
 
 jobs:
   build-and-push-api:
@@ -64,9 +68,13 @@ jobs:
 
             echo "🔹 Running new container..."
             docker run -d --name chatbot-database -p 6003:6003 \
-              -e FLASK_ENV=development \
-              -e SQLALCHEMY_DATABASE_URI="${{secrets.SQLALCHEMY_DATABASE_URI}}" \
-              ghcr.io/$REPO_NAME/chatbot-database:latest
+            -e FLASK_ENV=development \
+            -e SQLALCHEMY_DATABASE_URI="${{secrets.SQLALCHEMY_DATABASE_URI}}" \
+            -e REDIS_HOST="${{secrets.REDIS_HOST}}" \
+            -e REDIS_PORT="${{secrets.REDIS_PORT}}" \
+            -e REDIS_DB="${{secrets.REDIS_DB}}" \
+            -e REDIS_DECODE_RESPONSES="${{secrets.REDIS_DECODE_RESPONSES}}" \
+            ghcr.io/$REPO_NAME/chatbot-database:latest
 
             echo "✅ Deployment complete!"
             exit 0
