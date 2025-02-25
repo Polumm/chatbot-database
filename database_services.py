@@ -4,7 +4,9 @@ import json
 import time
 import random
 from datetime import datetime
-from models import db, User, ChatMessage  # + (Optional) Session model
+from models import db
+from models.user import User
+from models.chat_message import ChatMessage
 
 database_bp = Blueprint("database", __name__)
 
