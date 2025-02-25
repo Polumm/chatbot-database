@@ -3,10 +3,12 @@ from config import Config
 from models import db
 import redis
 from database_services import database_bp  # Import the Blueprint
+from flask_cors import CORS
 
 
 def create_app():
     app = Flask(__name__)
+    CORS(app)
     app.config.from_object(Config)
 
     # Initialize SQLAlchemy
