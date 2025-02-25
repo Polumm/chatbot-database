@@ -8,3 +8,5 @@ app/__pycache__
 cmd_env
 
 secret*
+
+.DS_Store
