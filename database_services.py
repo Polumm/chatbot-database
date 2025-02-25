@@ -75,6 +75,9 @@ def sync_redis_session_to_postgres(username, session_id):
 # =================================
 #       User Endpoints
 # =================================
+@database_bp.route("/", methods=["GET"])
+def health_check():
+    return jsonify({"status": "Chatbot Database Service is running!"}), 200
 
 
 @database_bp.route("/users", methods=["POST"])

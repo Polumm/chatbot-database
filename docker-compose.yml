@@ -5,6 +5,6 @@ services:
     ports:
       - "6003:6003"
     environment:
-      - FLASK_ENV=development
+      - FLASK_ENV=deployment
       - SQLALCHEMY_DATABASE_URI=${SQLALCHEMY_DATABASE_URI}
     restart: always

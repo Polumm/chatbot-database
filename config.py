@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
 
-# Conditionally load environment variables from .env file
-if os.getenv("FLASK_ENV") != "development":
+# Only load .env in development mode (Optional)
+if os.getenv("FLASK_ENV") == "development":
     load_dotenv()
 
 
@@ -12,12 +12,12 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Redis config
-    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_HOST = os.getenv("REDIS_HOST")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
     REDIS_DB = int(os.getenv("REDIS_DB", 0))
     REDIS_DECODE_RESPONSES = (
         os.getenv("REDIS_DECODE_RESPONSES", "True") == "True"
     )
 
-    # Flask Secret Key
+    # Flask Secret Key (Make sure to set this as an environment variable in production)
     SECRET_KEY = os.getenv("SECRET_KEY", "default_secret_key")
