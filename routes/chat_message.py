@@ -1,137 +1,23 @@
 from flask import Blueprint, request, jsonify, current_app
-from werkzeug.security import generate_password_hash
+
 import json
 import time
 import random
-from datetime import datetime
+
 from models import db
-from models.user import User
 from models.chat_message import ChatMessage
-
-database_bp = Blueprint("database", __name__)
-
-# =================================
-#         Helper Functions
-# =================================
+from . import get_user_id, sync_redis_session_to_postgres
 
 
-def get_user_id(username):
-    """
-    Helper to retrieve the user_id given a username.
-    """
-    user = User.query.filter_by(username=username).first()
-    return user.id if user else None
-
-
-def sync_redis_session_to_postgres(username, session_id):
-    """
-    Reads all messages for (username, session_id) from Redis,
-    writes them into the chat_messages table (if not already present).
-    """
-    user_id = get_user_id(username)
-    if not user_id:
-        return  # No such user in DB
-
-    conversation_key = f"bot-{username}-{session_id}"
-    raw_data = current_app.redis.zrange(
-        conversation_key, 0, -1, withscores=True
-    )
-
-    for msg_json, score in raw_data:
-        msg_obj = json.loads(msg_json)
-        sender = msg_obj.get("sender", "")
-        text = msg_obj.get("text", "")
-        # If 'time' was your canonical timestamp, parse it; otherwise use 'score'.
-        # Example uses the 'time' field:
-        ts_str = msg_obj.get("time")
-        try:
-            # Attempt to parse the original timestamp string:
-            timestamp = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-        except:
-            # Fallback: Use 'score' to create a timestamp
-            timestamp = datetime.fromtimestamp(score)
-
-        # Insert only if not exists (simple approach: try-except for duplicates):
-        existing = ChatMessage.query.filter_by(
-            user_id=user_id,
-            session_id=session_id,
-            sender=sender,
-            message=text,
-            timestamp=timestamp,
-        ).first()
-        if existing:
-            continue
-
-        chat_msg = ChatMessage(
-            user_id=user_id,
-            session_id=session_id,
-            sender=sender,
-            message=text,
-            timestamp=timestamp,
-        )
-        db.session.add(chat_msg)
-
-    db.session.commit()
+chat_message_api_bp = Blueprint("chat_message", __name__)
 
 
 # =================================
-#       User Endpoints
-# =================================
-@database_bp.route("/", methods=["GET"])
-def health_check():
-    return jsonify({"status": "Chatbot Database Service is running!"}), 200
-
-
-@database_bp.route("/users", methods=["POST"])
-def create_user():
-    data = request.get_json()
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"error": "Username and password required."}), 400
-
-    existing_user = User.query.filter_by(username=username).first()
-    if existing_user:
-        return jsonify({"error": "User already exists."}), 400
-
-    new_user = User(
-        username=username, password_hash=generate_password_hash(password)
-    )
-    db.session.add(new_user)
-    db.session.commit()
-    return jsonify({"message": "User created successfully!"}), 201
-
-
-@database_bp.route("/users/<username>", methods=["GET"])
-def get_user(username):
-    user = User.query.filter_by(username=username).first()
-    if not user:
-        return jsonify({"error": "User not found."}), 404
-    return jsonify(
-        {
-            "id": user.id,
-            "username": user.username,
-            "password_hash": user.password_hash,
-        }
-    )
-
-
-@database_bp.route("/users/<username>", methods=["DELETE"])
-def delete_user(username):
-    user = User.query.filter_by(username=username).first()
-    if not user:
-        return jsonify({"error": "User not found."}), 404
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({"message": "User deleted successfully!"})
-
-
-# =================================
-#    Bot Chat / Session Endpoints
+#    Chat Message Endpoints
 # =================================
 
 
-@database_bp.route("/botchat/sessions", methods=["POST"])
+@chat_message_api_bp.route("/botchat/sessions", methods=["POST"])
 def new_session():
     """
     Create a new chat session in Redis.
@@ -170,7 +56,7 @@ def new_session():
     return jsonify({"message": f"New session '{session_name}' created!"}), 201
 
 
-@database_bp.route("/botchat/sessions/<username>", methods=["GET"])
+@chat_message_api_bp.route("/botchat/sessions/<username>", methods=["GET"])
 def get_sessions(username):
     """
     Return all session IDs for a given user.
@@ -206,7 +92,7 @@ def get_sessions(username):
     return jsonify({"sessions": session_ids}), 200
 
 
-@database_bp.route("/botchat/messages", methods=["POST"])
+@chat_message_api_bp.route("/botchat/messages", methods=["POST"])
 def send_message():
     """
     Add a new message to a session in Redis.
@@ -248,7 +134,7 @@ def send_message():
     ), 201
 
 
-@database_bp.route(
+@chat_message_api_bp.route(
     "/botchat/messages/<username>/<session_id>", methods=["GET"]
 )
 def get_messages(username, session_id):
@@ -295,7 +181,7 @@ def get_messages(username, session_id):
     return jsonify({"messages": messages}), 200
 
 
-@database_bp.route(
+@chat_message_api_bp.route(
     "/botchat/delete/<username>/<session_id>", methods=["DELETE"]
 )
 def delete_session(username, session_id):
@@ -331,7 +217,7 @@ def delete_session(username, session_id):
     ), 200
 
 
-@database_bp.route("/botchat/search/<username>", methods=["GET"])
+@chat_message_api_bp.route("/botchat/search/<username>", methods=["GET"])
 def search_messages(username):
     """
     Fuzzy search across all chat sessions for the specified user in Redis only.
@@ -390,7 +276,9 @@ def search_messages(username):
 # =================================
 
 
-@database_bp.route("/botchat/sync/<username>/<session_id>", methods=["POST"])
+@chat_message_api_bp.route(
+    "/botchat/sync/<username>/<session_id>", methods=["POST"]
+)
 def sync_session(username, session_id):
     """
     Force a single session to be synced from Redis to PostgreSQL.
@@ -402,7 +290,7 @@ def sync_session(username, session_id):
     ), 200
 
 
-@database_bp.route("/botchat/logout/<username>", methods=["POST"])
+@chat_message_api_bp.route("/botchat/logout/<username>", methods=["POST"])
 def logout_user(username):
     """
     Example endpoint that syncs all sessions for a user, then (optionally) clears them from Redis.
