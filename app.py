@@ -1,6 +1,7 @@
 from flask import Flask
 from config import Config
 from models import db
+from routes import init_routes
 import redis
 from database_services import database_bp  # Import the Blueprint
 
@@ -26,6 +27,8 @@ def create_app():
     # Create database tables if they don't exist
     with app.app_context():
         db.create_all()
+
+    init_routes(app)
 
     return app
 
