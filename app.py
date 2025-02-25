@@ -1,9 +1,12 @@
 from flask import Flask
+import redis
+from flask_cors import CORS
+
 from config import Config
 from models import db
-import redis
-from database_services import database_bp  # Import the Blueprint
-from flask_cors import CORS
+from routes.chat_message import chat_message_api_bp  # Import the Blueprint
+from routes.friendship import friendship_api_bp
+from routes.user import user_api_bp
 
 
 def create_app():
@@ -22,8 +25,10 @@ def create_app():
         decode_responses=Config.REDIS_DECODE_RESPONSES,
     )
 
-    # Register the Blueprint
-    app.register_blueprint(database_bp)
+    # Register the Blueprints
+    app.register_blueprint(chat_message_api_bp)
+    app.register_blueprint(friendship_api_bp)
+    app.register_blueprint(user_api_bp)
 
     # Create database tables if they don't exist
     with app.app_context():
