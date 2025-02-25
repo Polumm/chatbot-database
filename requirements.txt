@@ -26,3 +26,4 @@ WTForms==3.2.1
 requests
 psycopg2
 python-dotenv
+flask_cors
