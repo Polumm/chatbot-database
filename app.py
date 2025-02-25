@@ -7,6 +7,7 @@ from models import db
 from routes.chat_message import chat_message_api_bp  # Import the Blueprint
 from routes.friendship import friendship_api_bp
 from routes.user import user_api_bp
+from routes.saved_movie import saved_movie_api_bp
 
 
 def create_app():
@@ -28,6 +29,7 @@ def create_app():
     # Register the Blueprints
     app.register_blueprint(chat_message_api_bp)
     app.register_blueprint(friendship_api_bp)
+    app.register_blueprint(saved_movie_api_bp)
     app.register_blueprint(user_api_bp)
 
     # Create database tables if they don't exist
