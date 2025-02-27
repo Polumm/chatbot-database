@@ -15,6 +15,10 @@ env:
   SERVER_KEY: ${{ secrets.SERVER_KEY }}
   GHCR_USER: ${{ github.repository_owner }}
   SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+  REDIS_HOST: ${{ secrets.REDIS_HOST }}
+  REDIS_PORT: ${{ secrets.REDIS_PORT }}
+  REDIS_DB: ${{ secrets.REDIS_DB }}
+  REDIS_DECODE_RESPONSES: ${{ secrets.REDIS_DECODE_RESPONSES }}
 
 jobs:
   build-and-push-api:
@@ -38,6 +42,45 @@ jobs:
             --build-arg SQLALCHEMY_DATABASE_URI=${{ secrets.SQLALCHEMY_DATABASE_URI }} \
             -t ghcr.io/$REPO_NAME/chatbot-database:latest \
             --push .
+
+  deploy-api:
+    runs-on: ubuntu-latest
+    needs: build-and-push-api
+
+    steps:
+      - name: Deploy to Azure Container Instance
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_KEY }}
+          script: |
+            echo "🔹 Deleting existing Azure Container Instance (if any)..."
+            az container delete \
+              --resource-group sse-cloud-lab \
+              --name chatbot-database \
+              --yes
+
+
+            echo "🔹 Deploying new Azure Container Instance..."
+            REPO_NAME=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+            az container create \
+              --resource-group sse-cloud-lab \
+              --name chatbot-database \
+              --image ghcr.io/polumm/chatbot-database:latest \
+              --os-type Linux \
+              --cpu 1 \
+              --memory 1.5 \
+              --dns-name-label chatbot-database \
+              --ports 6003 \
+              --environment-variables \
+                FLASK_ENV=production \
+                SQLALCHEMY_DATABASE_URI="${{secrets.SQLALCHEMY_DATABASE_URI}}" \
+                REDIS_HOST="${{secrets.REDIS_HOST}}" \
+                REDIS_PORT="${{secrets.REDIS_PORT}}" \
+                REDIS_DB="${{secrets.REDIS_DB}}" \
+                REDIS_DECODE_RESPONSES="${{secrets.REDIS_DECODE_RESPONSES}}"
 
   # deploy-api:
   #   runs-on: ubuntu-latest

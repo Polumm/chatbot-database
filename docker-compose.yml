@@ -7,4 +7,8 @@ services:
     environment:
       - FLASK_ENV=deployment
       - SQLALCHEMY_DATABASE_URI=${SQLALCHEMY_DATABASE_URI}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_DB=${REDIS_DB}
+      - REDIS_DECODE_RESPONSES=${REDIS_DECODE_RESPONSES}
     restart: always
