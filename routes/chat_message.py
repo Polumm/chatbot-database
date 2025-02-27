@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
-
+import redis
 import json
 import time
 import random
@@ -10,6 +10,30 @@ from . import get_user_id, sync_redis_session_to_postgres
 
 
 chat_message_api_bp = Blueprint("chat_message", __name__)
+
+
+def get_redis_connection():
+    """
+    Returns a valid Redis connection. If the existing connection
+    is stale/closed, re-initialize and retry once.
+    """
+    # Attempt twice: first the existing client, then re-init if needed.
+    for _ in range(2):
+        try:
+            current_app.redis.ping()
+            # If ping succeeds, return the existing client
+            return current_app.redis
+        except redis.exceptions.RedisError:
+            # Ping failed, or connection is stale => re-init
+            # Access the same logic as in create_app or re-create here
+            from app import create_app
+
+            app = create_app()
+            current_app.redis = app.redis
+
+    # If it still fails, let the error bubble up
+    # or you could raise a custom error
+    raise redis.exceptions.ConnectionError("Could not reconnect to Redis.")
 
 
 # =================================
@@ -38,11 +62,10 @@ def new_session():
             {"error": f"User '{username}' does not exist in DB."}
         ), 400
 
+    r = get_redis_connection()  # <-- Ensure valid Redis connection
     session_list_key = f"bot-sessions-{username}"
     # Check uniqueness (case-insensitive)
-    existing_sessions = {
-        s.lower() for s in current_app.redis.smembers(session_list_key)
-    }
+    existing_sessions = {s.lower() for s in r.smembers(session_list_key)}
     if session_name in existing_sessions:
         return jsonify(
             {
@@ -51,7 +74,7 @@ def new_session():
         ), 400
 
     # Add session to Redis
-    current_app.redis.sadd(session_list_key, session_name)
+    r.sadd(session_list_key, session_name)
 
     return jsonify({"message": f"New session '{session_name}' created!"}), 201
 
@@ -65,7 +88,8 @@ def get_sessions(username):
     3) Repopulate Redis so the next time we won't need the fallback.
     """
     session_list_key = f"bot-sessions-{username}"
-    redis_sessions = current_app.redis.smembers(session_list_key)
+    r = get_redis_connection()
+    redis_sessions = r.smembers(session_list_key)
 
     if redis_sessions:
         # Redis has data
@@ -227,13 +251,14 @@ def search_messages(username):
     if not query:
         return jsonify({"error": "No query provided."}), 400
 
+    r = get_redis_connection()  # <-- Ensure a valid Redis connection
     session_list_key = f"bot-sessions-{username}"
-    session_ids = current_app.redis.smembers(session_list_key)
+    session_ids = r.smembers(session_list_key)
     results = []
 
     for session_id in session_ids:
         conversation_key = f"bot-{username}-{session_id}"
-        messages_with_score = current_app.redis.zrange(
+        messages_with_score = r.zrange(
             conversation_key, 0, -1, withscores=True
         )
         for msg_json, score in messages_with_score:
@@ -260,12 +285,12 @@ def search_messages(username):
     #             ChatMessage.user_id == user_id,
     #             ChatMessage.message.ilike(f"%{query}%")
     #         ).all()
-    #         for r in records:
+    #         for rcd in records:
     #             results.append({
-    #                 "session_id": r.session_id,
-    #                 "sender": r.sender,
-    #                 "text": r.message,
-    #                 "time": r.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    #                 "session_id": rcd.session_id,
+    #                 "sender": rcd.sender,
+    #                 "text": rcd.message,
+    #                 "time": rcd.timestamp.strftime("%Y-%m-%d %H:%M:%S")
     #             })
 
     return jsonify({"results": results, "query": query}), 200
@@ -296,16 +321,18 @@ def logout_user(username):
     Example endpoint that syncs all sessions for a user, then (optionally) clears them from Redis.
     """
     # 1) Sync each session individually
+    r = get_redis_connection()  # <-- Use the helper to ensure valid Redis conn
     session_list_key = f"bot-sessions-{username}"
-    session_ids = current_app.redis.smembers(session_list_key)
+    session_ids = r.smembers(session_list_key)  # fetch sessions from Redis
+
     for session_id in session_ids:
         sync_redis_session_to_postgres(username, session_id)
 
-    # 2) (Optional) Clear them from Redis if you like
-    #    for session_id in session_ids:
-    #        conversation_key = f"bot-{username}-{session_id}"
-    #        current_app.redis.delete(conversation_key)
-    #    current_app.redis.delete(session_list_key)
+    # 2) (Optional) Clear them from Redis if you want to remove them after syncing
+    # for session_id in session_ids:
+    #     conversation_key = f"bot-{username}-{session_id}"
+    #     r.delete(conversation_key)
+    # r.delete(session_list_key)
 
     return jsonify(
         {"message": f"All sessions for user '{username}' synced to Postgres."}

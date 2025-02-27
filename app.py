@@ -18,13 +18,21 @@ def create_app():
     # Initialize SQLAlchemy
     db.init_app(app)
 
-    # Initialize Redis
-    app.redis = redis.Redis(
-        host=Config.REDIS_HOST,
-        port=Config.REDIS_PORT,
-        db=Config.REDIS_DB,
-        decode_responses=Config.REDIS_DECODE_RESPONSES,
-    )
+    # Create a helper function that returns a Redis client with robust settings
+    def create_robust_redis_client():
+        return redis.Redis(
+            host=Config.REDIS_HOST,
+            port=Config.REDIS_PORT,
+            db=Config.REDIS_DB,
+            decode_responses=Config.REDIS_DECODE_RESPONSES,
+            # The following are key to avoiding stale connections:
+            socket_keepalive=True,           # Keep TCP alive
+            retry_on_timeout=True,          # Retry automatically if timed out
+            health_check_interval=30        # Seconds between PINGs for idle connections
+        )
+
+    # Initialize a robust Redis client
+    app.redis = create_robust_redis_client()
 
     # Register the Blueprints
     app.register_blueprint(chat_message_api_bp)
