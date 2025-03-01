@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, current_app
 import redis
 import json
@@ -5,8 +6,13 @@ import time
 import random
 
 from models import db
+
+# Look up the User by username
+from models.user import User
+from models.active_user import ActiveUser
 from models.chat_message import ChatMessage
-from . import get_user_id, sync_redis_session_to_postgres
+from . import get_user_id
+from routes import get_redis_connection, sync_redis_session_to_postgres 
 
 
 chat_message_api_bp = Blueprint("chat_message", __name__)
@@ -337,3 +343,97 @@ def logout_user(username):
     return jsonify(
         {"message": f"All sessions for user '{username}' synced to Postgres."}
     ), 200
+
+
+def update_active_user(user_id, last_seen=None, session_expiry=None):
+    """
+    Finds or creates an ActiveUser entry for user_id.
+    Updates 'last_seen' and 'session_expiry' if provided.
+    """
+    active_user = ActiveUser.query.filter_by(user_id=user_id).first()
+    if not active_user:
+        active_user = ActiveUser(user_id=user_id)
+        db.session.add(active_user)
+
+    if last_seen:
+        active_user.last_seen = last_seen
+    if session_expiry:
+        active_user.session_expiry = session_expiry
+
+    db.session.commit()
+    return active_user
+
+
+@chat_message_api_bp.route("/botchat/update_session_expiry", methods=["POST"])
+def update_session_expiry():
+    """
+    Update active-user record in DB with last_seen or session_expiry.
+    """
+    data = request.get_json()
+    username = data.get("username")
+    exp = data.get("exp")  # Typically seconds since epoch
+
+    if not username or exp is None:
+        return jsonify({"error": "username and exp are required."}), 400
+
+    # Convert exp -> Python datetime
+    from datetime import datetime
+
+    last_seen_dt = datetime.fromtimestamp(datetime.timezone.utc)
+
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({"error": f"User '{username}' not found."}), 404
+
+    # Update or create the ActiveUser entry
+    active_record = ActiveUser.query.filter_by(user_id=user.id).first()
+    if not active_record:
+        active_record = ActiveUser(user_id=user.id)
+        db.session.add(active_record)
+
+    active_record.last_seen = last_seen_dt
+    db.session.commit()
+
+    return jsonify({"status": "updated", "last_seen": str(last_seen_dt)}), 200
+
+
+INACTIVITY_THRESHOLD = 15  # minutes
+
+
+@chat_message_api_bp.task
+def check_for_inactive_users():
+    # 1) Calculate cutoff
+    cutoff = datetime.now(datetime.timezone.utc) - timedelta(
+        minutes=INACTIVITY_THRESHOLD
+    )
+
+    # 2) Query all active_user rows whose last_seen < cutoff
+    inactive_records = ActiveUser.query.filter(
+        ActiveUser.last_seen < cutoff
+    ).all()
+
+    # 3) For each user, sync sessions to Postgres
+    for record in inactive_records:
+        username = record.user.username
+        # Approach A: direct sync all sessions for that user
+        #    sync_redis_session_to_postgres(username, session_id=None)
+        # or approach B: call the logout endpoint you already have:
+        #    requests.post(f"{DB_SERVICE_URL}/botchat/logout/{username}")
+        # (Note: careful with circular calls if you're inside the same service!)
+
+        r = get_redis_connection()
+        session_list_key = f"bot-sessions-{username}"
+        session_ids = r.smembers(session_list_key)
+        for s_id in session_ids:
+            sync_redis_session_to_postgres(username, s_id)
+
+        # 4) Optionally, remove them from Redis entirely
+        # r.delete(session_list_key)
+        # for s_id in session_ids:
+        #     conversation_key = f"bot-{username}-{s_id}"
+        #     r.delete(conversation_key)
+
+        # 5) Remove or update the active_user record. (e.g. if you want to mark them as truly 'inactive')
+        db.session.delete(record)
+
+    db.session.commit()
