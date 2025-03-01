@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone 
 from flask import Blueprint, request, jsonify, current_app
 import redis
 import json
@@ -345,25 +345,6 @@ def logout_user(username):
     ), 200
 
 
-def update_active_user(user_id, last_seen=None, session_expiry=None):
-    """
-    Finds or creates an ActiveUser entry for user_id.
-    Updates 'last_seen' and 'session_expiry' if provided.
-    """
-    active_user = ActiveUser.query.filter_by(user_id=user_id).first()
-    if not active_user:
-        active_user = ActiveUser(user_id=user_id)
-        db.session.add(active_user)
-
-    if last_seen:
-        active_user.last_seen = last_seen
-    if session_expiry:
-        active_user.session_expiry = session_expiry
-
-    db.session.commit()
-    return active_user
-
-
 @chat_message_api_bp.route("/botchat/update_session_expiry", methods=["POST"])
 def update_session_expiry():
     """
@@ -376,10 +357,7 @@ def update_session_expiry():
     if not username or exp is None:
         return jsonify({"error": "username and exp are required."}), 400
 
-    # Convert exp -> Python datetime
-    from datetime import datetime
-
-    last_seen_dt = datetime.fromtimestamp(datetime.timezone.utc)
+    last_seen_dt = datetime.now(timezone.utc)
 
     user = User.query.filter_by(username=username).first()
     if not user:
