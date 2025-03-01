@@ -12,7 +12,7 @@ from models.user import User
 from models.active_user import ActiveUser
 from models.chat_message import ChatMessage
 from . import get_user_id
-from routes import get_redis_connection, sync_redis_session_to_postgres 
+from routes import sync_redis_session_to_postgres
 
 
 chat_message_api_bp = Blueprint("chat_message", __name__)
@@ -395,45 +395,3 @@ def update_session_expiry():
     db.session.commit()
 
     return jsonify({"status": "updated", "last_seen": str(last_seen_dt)}), 200
-
-
-INACTIVITY_THRESHOLD = 15  # minutes
-
-
-@chat_message_api_bp.task
-def check_for_inactive_users():
-    # 1) Calculate cutoff
-    cutoff = datetime.now(datetime.timezone.utc) - timedelta(
-        minutes=INACTIVITY_THRESHOLD
-    )
-
-    # 2) Query all active_user rows whose last_seen < cutoff
-    inactive_records = ActiveUser.query.filter(
-        ActiveUser.last_seen < cutoff
-    ).all()
-
-    # 3) For each user, sync sessions to Postgres
-    for record in inactive_records:
-        username = record.user.username
-        # Approach A: direct sync all sessions for that user
-        #    sync_redis_session_to_postgres(username, session_id=None)
-        # or approach B: call the logout endpoint you already have:
-        #    requests.post(f"{DB_SERVICE_URL}/botchat/logout/{username}")
-        # (Note: careful with circular calls if you're inside the same service!)
-
-        r = get_redis_connection()
-        session_list_key = f"bot-sessions-{username}"
-        session_ids = r.smembers(session_list_key)
-        for s_id in session_ids:
-            sync_redis_session_to_postgres(username, s_id)
-
-        # 4) Optionally, remove them from Redis entirely
-        # r.delete(session_list_key)
-        # for s_id in session_ids:
-        #     conversation_key = f"bot-{username}-{s_id}"
-        #     r.delete(conversation_key)
-
-        # 5) Remove or update the active_user record. (e.g. if you want to mark them as truly 'inactive')
-        db.session.delete(record)
-
-    db.session.commit()

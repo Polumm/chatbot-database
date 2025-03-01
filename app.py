@@ -12,7 +12,8 @@ from routes.chat_message import chat_message_api_bp  # Import the Blueprint
 from routes.friendship import friendship_api_bp
 from routes.user import user_api_bp
 from routes.saved_movie import saved_movie_api_bp
-from routes import get_redis_connection, sync_redis_session_to_postgres
+from routes.chat_message import get_redis_connection
+from routes import sync_redis_session_to_postgres
 
 
 def background_inactive_checker(app):
