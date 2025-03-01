@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from . import db
 
 
@@ -9,7 +9,7 @@ class ActiveUser(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     last_seen = db.Column(
         db.DateTime,
-        default=datetime.now(datetime.timezone.utc),
+        default=datetime.now(timezone.utc),
         nullable=False,
     )
     session_expiry = db.Column(db.DateTime, nullable=True)
