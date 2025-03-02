@@ -22,10 +22,10 @@ def background_inactive_checker(app):
     have not sent a heartbeat for > 15 minutes, then syncing their
     Redis data to Postgres.
     """
-    with app.app_context():
-        while True:
+    while True:
+        time.sleep(300)
             # Sleep 5 minutes between checks
-            time.sleep(300)
+        with app.app_context():
 
             # Calculate the cutoff for inactivity (15 minutes)
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)

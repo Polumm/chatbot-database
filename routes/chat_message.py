@@ -1,4 +1,4 @@
-from datetime import datetime, timezone 
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 import redis
 import json
@@ -23,22 +23,22 @@ def get_redis_connection():
     Returns a valid Redis connection. If the existing connection
     is stale/closed, re-initialize and retry once.
     """
-    # Attempt twice: first the existing client, then re-init if needed.
     for _ in range(2):
         try:
             current_app.redis.ping()
-            # If ping succeeds, return the existing client
+            # If ping succeeds, return it
             return current_app.redis
         except redis.exceptions.RedisError:
-            # Ping failed, or connection is stale => re-init
-            # Access the same logic as in create_app or re-create here
-            from app import create_app
-
-            app = create_app()
-            current_app.redis = app.redis
-
-    # If it still fails, let the error bubble up
-    # or you could raise a custom error
+            # Re-init just the Redis client, NOT the entire Flask app
+            current_app.redis = redis.Redis(
+                host=current_app.config["REDIS_HOST"],
+                port=current_app.config["REDIS_PORT"],
+                db=current_app.config["REDIS_DB"],
+                decode_responses=current_app.config["REDIS_DECODE_RESPONSES"],
+                socket_keepalive=True,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
     raise redis.exceptions.ConnectionError("Could not reconnect to Redis.")
 
 
