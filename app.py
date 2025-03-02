@@ -69,6 +69,7 @@ def create_app():
             socket_keepalive=True,
             retry_on_timeout=True,
             health_check_interval=30,
+            socket_connect_timeout=2,
         )
 
     app.redis = create_robust_redis_client()

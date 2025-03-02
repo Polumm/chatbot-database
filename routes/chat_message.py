@@ -38,6 +38,7 @@ def get_redis_connection():
                 socket_keepalive=True,
                 retry_on_timeout=True,
                 health_check_interval=30,
+                socket_connect_timeout=2,
             )
     raise redis.exceptions.ConnectionError("Could not reconnect to Redis.")
 
@@ -95,7 +96,9 @@ def get_sessions(username):
     """
     session_list_key = f"bot-sessions-{username}"
     r = get_redis_connection()
+    print("redis connected")
     redis_sessions = r.smembers(session_list_key)
+    print(f"{redis_sessions = }")
 
     if redis_sessions:
         # Redis has data
