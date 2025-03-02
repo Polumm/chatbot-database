@@ -23,12 +23,16 @@ def get_redis_connection():
     Returns a valid Redis connection. If the existing connection
     is stale/closed, re-initialize and retry once.
     """
-    for _ in range(2):
+    for attempt in range(2):
         try:
             current_app.redis.ping()
+            print("Debug: Successfully pinged")
             # If ping succeeds, return it
             return current_app.redis
         except redis.exceptions.RedisError:
+            print(
+                f"Debug: Unsuccessfully pinged, re-initialising redis client, {attempt = }"
+            )
             # Re-init just the Redis client, NOT the entire Flask app
             current_app.redis = redis.Redis(
                 host=current_app.config["REDIS_HOST"],
@@ -96,9 +100,9 @@ def get_sessions(username):
     """
     session_list_key = f"bot-sessions-{username}"
     r = get_redis_connection()
-    print("redis connected")
+    print("Debug: redis connected")
     redis_sessions = r.smembers(session_list_key)
-    print(f"{redis_sessions = }")
+    print(f"Debug: sessions retrieved, {redis_sessions = }")
 
     if redis_sessions:
         # Redis has data
