@@ -14,41 +14,39 @@ from routes.friendship import friendship_api_bp
 from routes.saved_movie import saved_movie_api_bp
 from routes.user import user_api_bp
 from routes import sync_redis_session_to_postgres
+from sqlalchemy.exc import OperationalError
 
 
 def background_inactive_checker(app):
-    """
-    Runs in a background thread, periodically checking which users
-    have not sent a heartbeat for > 15 minutes, then syncing their
-    Redis data to Postgres.
-    """
     while True:
         time.sleep(300)
-            # Sleep 5 minutes between checks
         with app.app_context():
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+                inactive_records = ActiveUser.query.filter(
+                    ActiveUser.last_seen < cutoff
+                ).all()
 
-            # Calculate the cutoff for inactivity (15 minutes)
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+                for record in inactive_records:
+                    username = record.user.username
+                    r = get_redis_connection()
+                    session_list_key = f"bot-sessions-{username}"
+                    session_ids = r.smembers(session_list_key)
 
-            # Fetch all records with last_seen < (now - 15 minutes)
-            inactive_records = ActiveUser.query.filter(
-                ActiveUser.last_seen < cutoff
-            ).all()
+                    for s_id in session_ids:
+                        sync_redis_session_to_postgres(username, s_id)
 
-            # For each inactive user, sync Redis => Postgres, then remove the record
-            for record in inactive_records:
-                username = record.user.username
-                r = get_redis_connection()
-                session_list_key = f"bot-sessions-{username}"
-                session_ids = r.smembers(session_list_key)
+                    db.session.delete(record)
 
-                for s_id in session_ids:
-                    sync_redis_session_to_postgres(username, s_id)
+                db.session.commit()
 
-                # Remove them from ActiveUser to avoid re-checking
-                db.session.delete(record)
-
-            db.session.commit()
+            except OperationalError:
+                # Stale connection? Roll back, dispose, and optionally log it.
+                db.session.rollback()
+                db.engine.dispose()
+                print(
+                    "Detected stale DB connection, disposed engine and will retry."
+                )
 
 
 def create_app():
@@ -58,6 +56,7 @@ def create_app():
 
     # Initialize SQLAlchemy with the configured engine options
     db.init_app(app)
+    print("Engine options:", app.config.get("SQLALCHEMY_ENGINE_OPTIONS"))
 
     # Create a robust Redis client
     def create_robust_redis_client():
