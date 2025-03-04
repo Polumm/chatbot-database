@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
+from sqlalchemy.exc import SQLAlchemyError
 import redis
 import json
 import time
@@ -94,37 +95,70 @@ def new_session():
 def get_sessions(username):
     """
     Return all session IDs for a given user.
-    1) Check Redis first.
-    2) If Redis is empty, fallback to PostgreSQL (chat_messages).
-    3) Repopulate Redis so the next time we won't need the fallback.
+    1) Check Redis first with a timeout limit.
+    2) If Redis is empty or times out, fallback to PostgreSQL (chat_messages).
+    3) Repopulate Redis for faster future requests.
     """
     session_list_key = f"bot-sessions-{username}"
     r = get_redis_connection()
-    print("Debug: redis connected")
-    redis_sessions = r.smembers(session_list_key)
-    print(f"Debug: sessions retrieved, {redis_sessions = }")
+    redis_timeout_limit = 1  # Max 1 seconds for Redis to respond
 
-    if redis_sessions:
-        # Redis has data
-        session_ids = sorted(list(redis_sessions))
-    else:
+    session_ids = []
+
+    try:
+        # Time-bound Redis request to avoid cold start delay
+        start_time = time.time()
+        redis_sessions = r.smembers(session_list_key)
+        elapsed_time = time.time() - start_time
+
+        if elapsed_time > redis_timeout_limit:
+            raise redis.exceptions.TimeoutError(
+                f"Redis request took too long ({elapsed_time:.2f}s)"
+            )
+
+        if redis_sessions:
+            session_ids = sorted(list(redis_sessions))
+            current_app.logger.info(
+                f"Fetched sessions from Redis for {username} in {elapsed_time:.2f}s"
+            )
+
+    except (
+        redis.exceptions.ConnectionError,
+        redis.exceptions.TimeoutError,
+    ) as e:
+        current_app.logger.warning(
+            f"Redis unavailable or slow for {username}, falling back to PostgreSQL: {str(e)}"
+        )
+
+    if not session_ids:
         # Fallback to PostgreSQL
         user_id = get_user_id(username)
         if not user_id:
             return jsonify({"sessions": []}), 200
 
-        # Query distinct session_ids from chat_messages
-        session_records = (
-            db.session.query(ChatMessage.session_id)
-            .filter_by(user_id=user_id)
-            .distinct()
-            .all()
-        )
-        session_ids = [row.session_id for row in session_records]
+        try:
+            # Query distinct session_ids from chat_messages
+            session_records = (
+                db.session.query(ChatMessage.session_id)
+                .filter_by(user_id=user_id)
+                .distinct()
+                .all()
+            )
+            session_ids = [row.session_id for row in session_records]
 
-        # Repopulate Redis so future requests are fast
-        for sid in session_ids:
-            current_app.redis.sadd(session_list_key, sid)
+            # Repopulate Redis so future requests are faster
+            for sid in session_ids:
+                r.sadd(session_list_key, sid)
+
+            current_app.logger.info(
+                f"Repopulated Redis with sessions for {username}"
+            )
+
+        except SQLAlchemyError as e:
+            current_app.logger.error(
+                f"Database query error for {username}: {str(e)}"
+            )
+            return jsonify({"error": "Database error"}), 500
 
     return jsonify({"sessions": session_ids}), 200
 
