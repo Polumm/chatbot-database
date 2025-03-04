@@ -20,7 +20,6 @@ def save_movie():
     title = data.get("title")
     poster_path = data.get("poster_path")
     rating = data.get("rating")
-    notes = data.get("notes")
 
     # Check if the movie is already saved by this user
     existing_saved = SavedMovie.query.filter_by(
@@ -37,7 +36,6 @@ def save_movie():
         title=title,
         poster_path=poster_path,
         rating=rating,
-        notes=notes,
     )
 
     db.session.add(saved_movie)
@@ -69,7 +67,6 @@ def get_saved_movies():
             "title": movie.title,
             "poster_path": movie.poster_path,
             "rating": movie.rating,
-            "notes": movie.notes,
             "created_at": movie.created_at.isoformat()
             if movie.created_at
             else None,
@@ -111,7 +108,6 @@ def update_saved_movie():
     saved_id = data.get("saved_id")
     user_id = data.get("user_id")
     rating = data.get("rating")
-    notes = data.get("notes")
 
     # Find the saved movie
     saved_movie = SavedMovie.query.filter_by(
@@ -126,8 +122,6 @@ def update_saved_movie():
     # Update fields if provided
     if rating is not None:
         saved_movie.rating = rating
-    if notes is not None:
-        saved_movie.notes = notes
 
     db.session.commit()
 
