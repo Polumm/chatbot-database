@@ -15,6 +15,7 @@ from routes.saved_movie import saved_movie_api_bp
 from routes.user import user_api_bp
 from routes import sync_redis_session_to_postgres
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 
 def background_inactive_checker(app):
@@ -23,6 +24,7 @@ def background_inactive_checker(app):
         with app.app_context():
             try:
                 cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+
                 inactive_records = ActiveUser.query.filter(
                     ActiveUser.last_seen < cutoff
                 ).all()
@@ -36,12 +38,15 @@ def background_inactive_checker(app):
                     for s_id in session_ids:
                         sync_redis_session_to_postgres(username, s_id)
 
-                    db.session.delete(record)
-
-                db.session.commit()
+                    try:
+                        db.session.refresh(record)  # Ensure record exists
+                        db.session.delete(record)
+                        db.session.commit()  # Commit after each delete
+                    except ObjectDeletedError:
+                        db.session.rollback()
+                        continue
 
             except OperationalError:
-                # Stale connection? Roll back, dispose, and optionally log it.
                 db.session.rollback()
                 db.engine.dispose()
                 print(
