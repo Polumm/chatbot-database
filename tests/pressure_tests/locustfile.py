@@ -32,7 +32,7 @@ class ChatMessageUser(HttpUser):
             f"test_session_{generate_global_hash(self.username)}".lower()
         )
 
-        # Create the session exactly once here
+        # 1) Create the session exactly once here
         create_resp = self.client.post(
             "/botchat/sessions",
             json={
@@ -42,16 +42,35 @@ class ChatMessageUser(HttpUser):
             name="create_session",
         )
         if create_resp.status_code not in (200, 201):
-            # If it fails because the session already exists, that means
-            # we accidentally chose a previously used session name (unlikely but possible).
-            # You can handle it by ignoring, or re-generating the session name, etc.
+            # If it fails because the session already exists, you could
+            # regenerate a new session_name or just log it.
             print(f"❌ Failed to create session: {create_resp.text}")
 
-    @task
+    @task(1)
+    def get_sessions_list(self):
+        """
+        Task to simulate the user retrieving all their sessions,
+        e.g. when they first load the chatbot page.
+        """
+        get_resp = self.client.get(
+            f"/botchat/sessions/{self.username}",
+            name="get_sessions",
+        )
+        if get_resp.status_code == 200:
+            data = get_resp.json()
+            sessions = data.get("sessions", [])
+            print(
+                f"✅ [User={self.username}] has {len(sessions)} sessions. "
+                f"(Looking for '{self.session_name}' among them...)"
+            )
+        else:
+            print(f"❌ Failed to fetch sessions: {get_resp.text}")
+
+    @task(3)
     def send_and_get_messages(self):
         """
-        This task runs in a loop. We do NOT create the session again.
-        We only send a message and retrieve messages.
+        Task to send a new message to our pre-created session,
+        then fetch and verify the messages in that session.
         """
         # 1) Send message
         message_resp = self.client.post(
@@ -77,7 +96,8 @@ class ChatMessageUser(HttpUser):
             data = get_resp.json()
             msg_count = len(data.get("messages", []))
             print(
-                f"✅ [User={self.username}, Session={self.session_name}] Fetched {msg_count} messages."
+                f"✅ [User={self.username}, Session={self.session_name}] "
+                f"Fetched {msg_count} messages."
             )
         else:
             print(f"❌ Failed to get messages: {get_resp.text}")
