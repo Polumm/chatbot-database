@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-database
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: chatbot-database
+  template:
+    metadata:
+      labels:
+        app: chatbot-database
+    spec:
+      containers:
+      - name: chatbot-database
+        image: ghcr.io/polumm/chatbot-database:latest
+        ports:
+        - containerPort: 6003
+        envFrom:
+        - secretRef:
+            name: chatbot-secrets
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "1.5Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-database-service
+spec:
+  selector:
+    app: chatbot-database
+  ports:
+  - protocol: TCP
+    port: 6003
+    targetPort: 6003
+  type: ClusterIP
